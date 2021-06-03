@@ -149,3 +149,4 @@ if __name__ == '__main__':
     face_recognition.train(train_txt='data/val.txt', base='data')
     # face_recognition.predict('data/train', 'data/test_predict.txt')
     face_recognition.predict('data/gallery', 'data/2.txt')
+    face_recognition.model.save('data/trainModel/train.xml')
