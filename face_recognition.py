@@ -1,29 +1,30 @@
 import os
+
 import cv2
-import time
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-from utils import letterbox_image
 
 
 class FaceRecognition(object):
-    _defaults = {
-        "input_size": [200, 200],
-        "classifier": "haarcascade_frontalface_alt2.xml",
-        "classifier_base": r"D:\software\Anaconda3\Lib\site-packages\cv2\data",
-        "n_components": 150
-    }
 
-    def __init__(self, **kwargs):
-        self.__dict__.update(self._defaults)
-        self.input_size = self._defaults["input_size"]
-        self.face_cascade = cv2.CascadeClassifier(
-            os.path.join(self._defaults["classifier_base"], self._defaults["classifier"])
+    def __init__(self, input_size=(200, 200), classifier_base=r"D:\software\Anaconda3\Lib\site-packages\cv2\data",
+                 classifier_front="haarcascade_frontalface_alt2.xml",
+                 classifier_left="haarcascade_profileface.xml",
+                 n_components=200,
+                 **kwargs):
+        self.input_size = input_size
+        self.face_front = cv2.CascadeClassifier(
+            os.path.join(classifier_base, classifier_front)
         )
-        self.pca = PCA(n_components=self._defaults["n_components"])
+        self.face_left = cv2.CascadeClassifier(
+            os.path.join(classifier_base, classifier_left)
+        )
+        self.pca = PCA(n_components=n_components)
         self.model = cv2.face.FisherFaceRecognizer_create()
+        # self.model = cv2.face.EigenFaceRecognizer_create()
         self.images = []
         self.labels = []
 
@@ -32,8 +33,13 @@ class FaceRecognition(object):
             img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
             img_gray = img.copy()
-        faces = self.face_cascade.detectMultiScale(img_gray)
+        faces = self.face_front.detectMultiScale(img_gray)
         results = []
+        if len(faces) == 0:
+            faces = self.face_left.detectMultiScale(img_gray)
+        if len(faces) == 0:
+            img_gray = cv2.flip(img_gray, 1)
+            faces = self.face_left.detectMultiScale(img_gray)
         for (x, y, width, height) in faces:
             results.append([x, y, x + width, y + height])
         return results
@@ -41,39 +47,50 @@ class FaceRecognition(object):
     def save_rectangle(self, base: str, train_txt: str):
         if os.path.exists(train_txt):
             os.remove(train_txt)
-        fp = open(train_txt)
-        cnt = 0
+        fp = open(train_txt, 'a+')
         res = ''
+        hit = 0
         with open(os.path.join(base, 'val_label.txt'), 'r') as f:
             lines = f.readlines()
         for line in tqdm(lines):
             img_path, label = line.strip().split(' ')
             img = cv2.imread(os.path.join(base, 'img/' + img_path))
             results = self.detect_faces(img)
-            cnt += 1
             res += img_path + ' ' + label + ' '
             if len(results) > 0:
+                hit += 1
                 for tmp in results:
                     res += ','.join(str(x) for x in tmp) + ' '
             res += '\n'
         fp.write(res)
         fp.close()
-        print('Faces were detected: %.4f' % (cnt / len(lines)))
+        print('Faces were detected: %.4f' % (hit / len(lines)))
+        print('Faces were not detected: %d' % hit)
 
     def train(self, train_txt: str, base: str):
         if not os.path.exists(train_txt):
             self.save_rectangle(base, train_txt)
         image_data = []
+        i = 0
         with open(train_txt, 'r') as f:
             for line in tqdm(f.readlines()):
                 tmp = line.strip().split(' ')
-                img = cv2.imread(os.path.join(base, 'img/' + tmp[0]))
+                img = cv2.imread(os.path.join(base, 'train/' + tmp[0]))
                 label = tmp[1]
+
                 if len(tmp) > 2:
                     rec = list(map(int, tmp[2].split(',')))
                     img = img[rec[1]:rec[3], rec[0]:rec[2]]
-                self.images.append(letterbox_image(img, self.input_size))
+                    if i % 100 == 0:
+                        plt.imshow(img)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                if i % 100 == 0:
+                    plt.imshow(img)
+                    plt.show()
+                self.images.append(cv2.resize(img, self.input_size))
                 self.labels.append(int(label))
+                i += 1
+
         for image in self.images:
             data = image.flatten()
             image_data.append(data)
@@ -108,7 +125,8 @@ class FaceRecognition(object):
                 if len(results) > 0:
                     x1, y1, x2, y2 = results[0]
                     img = img[y1:y2, x1:x2]
-                img = letterbox_image(img, self.input_size)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                img = cv2.resize(img, self.input_size)
                 image_data.append(img.flatten())
                 img_names.append(file)
                 cnt += 1
@@ -117,7 +135,9 @@ class FaceRecognition(object):
         res = ''
         for i in range(len(img_names)):
             res += img_names[i] + ' '
-            res += str(self.model.predict(x[i])[0]) + '\n'
+            tmp = self.model.predict(x[i])
+            res += str(tmp[0]) + '\n'
+            print(tmp[1])
         fp = open(res_path, 'w')
         fp.write(res)
         fp.close()
@@ -127,4 +147,5 @@ class FaceRecognition(object):
 if __name__ == '__main__':
     face_recognition = FaceRecognition()
     face_recognition.train(train_txt='data/val.txt', base='data')
-    face_recognition.predict('data/img', 'data/test_predict.txt')
+    # face_recognition.predict('data/train', 'data/test_predict.txt')
+    face_recognition.predict('data/gallery', 'data/2.txt')
